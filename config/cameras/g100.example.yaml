@@ -1,0 +1,15 @@
+id: g100-01
+name: Existing stationary camera (not connected)
+type: rtsp
+enabled: false
+url_env: UAP_G100_01_RTSP_URL
+transport: tcp
+analysis_fps: 5
+analysis_width: 960
+record_audio: false
+profile: auto_day_night
+recording:
+  mode: rolling_segments
+  nominal_segment_seconds: 10
+  preserve_pre_seconds: 30
+  preserve_post_seconds: 45

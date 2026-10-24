@@ -1,0 +1,13 @@
+id: fixture-sky
+name: Generated sky — software test only
+type: synthetic
+enabled: true
+analysis_fps: 20
+analysis_width: 320
+record_audio: false
+profile: fixture
+recording:
+  mode: rolling_segments
+  nominal_segment_seconds: 1
+  preserve_pre_seconds: 30
+  preserve_post_seconds: 45

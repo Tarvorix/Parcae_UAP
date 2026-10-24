@@ -1,0 +1,9 @@
+host: 127.0.0.1
+port: 8000
+cameras:
+  - cameras/synthetic.example.yaml
+  - cameras/g100.example.yaml
+
+# Rolling source quota; protected event data is never deleted to satisfy it.
+rolling_quota_bytes: 2147483648
+safety_reserve_bytes: 134217728
