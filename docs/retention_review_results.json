@@ -1,0 +1,17 @@
+{
+  "original_isolated_cleanup_seconds": 7.814051871002448,
+  "original_isolated_packet_reader_pause_seconds": 6.612,
+  "fixed_same_metadata_cleanup_seconds": 0.031303345000196714,
+  "source_packets_after_fix": 120,
+  "capture_error": null,
+  "schema_version": 5,
+  "lookup_plan": [
+    {
+      "id": 2,
+      "parent": 0,
+      "notused": 55,
+      "detail": "SEARCH es USING COVERING INDEX event_segments_segment (segment_id=?)"
+    }
+  ],
+  "scope": "Synthetic metadata copy only; original interrupted soak bytes/database unchanged"
+}

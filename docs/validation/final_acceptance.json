@@ -1,0 +1,32 @@
+{
+  "checked_utc": "2026-10-24T14:36:57.918233+00:00",
+  "verified": true,
+  "soak_status": "passed",
+  "wall_seconds": 29059.838558247004,
+  "media_seconds": 28800.0,
+  "counts": {
+    "sessions": 240,
+    "frames": 288000,
+    "packets": 288000,
+    "events": 480,
+    "analyses": 480,
+    "reviews": 240,
+    "exports": 240
+  },
+  "sqlite_integrity": "ok",
+  "foreign_key_violations": 0,
+  "mapping_unavailable_frames": 0,
+  "source_gaps": 0,
+  "unsealed_events": 0,
+  "protected_rolling_segments_verified": 25440,
+  "capture_artifacts_verified": 47280,
+  "export_hashes_verified": 240,
+  "core_hashes_and_inventory_unchanged": true,
+  "build_source_sha256": "9536242d69b7c2b422f7dbc630c6befa7f8512597d1306f843f540198c8ec6b1",
+  "data_directory_bytes": 1337261164,
+  "disk_free_bytes": 28728954880,
+  "limitations": [
+    "Generated repeated file epochs,not physical-camera uptime or field detector accuracy",
+    "Each export was independently decoded/verified during its epoch; post-soak check rehashed every export and capture artifact"
+  ]
+}

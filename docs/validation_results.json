@@ -1,0 +1,145 @@
+{
+  "environment": {
+    "os": "Linux Debian13",
+    "architecture": "x86_64",
+    "python": "3.15.1",
+    "uv": "0.13.5",
+    "ffmpeg_executable": "7.1.5",
+    "pyav": "19.0.2",
+    "ijson": "3.6.0",
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "chromium": "154.0.8037.57",
+    "logical_cpus": 5,
+    "memory_total_kib": 18440112
+  },
+  "setup": {
+    "command": "make setup",
+    "result": "passed",
+    "locked": true
+  },
+  "unit_integration": {
+    "command": "make test",
+    "pytest_passed": 56,
+    "pytest_wall_seconds": 49.64,
+    "ruff": "passed",
+    "mypy_modules": 33,
+    "vitest_passed": 2,
+    "typescript_build": "passed"
+  },
+  "browser": {
+    "command": "CHROMIUM_PATH=/usr/bin/chromium make browser-test",
+    "passed": 3,
+    "wall_seconds": 15.1
+  },
+  "critical_review": "critical_review.md",
+  "loopback_rtsp": "passed using repository-local TCP/RTP fixture; no physical camera",
+  "final_soak": {
+    "analysis_delivery_drops": 1198,
+    "api_event_list_checks": 240,
+    "baseline_peak_rss_kib": 237032,
+    "code_manifest_sha256": "7ed43046f4a42ac6228aac50ca62fae57a6c9d9a08c429b95c369fba486a223e",
+    "code_unchanged": true,
+    "cpu_seconds": 5845.855603278999,
+    "description": "Each finite file loop is a separate capture epoch. Inter-epoch processing time is not camera coverage.",
+    "errors": [],
+    "events": 480,
+    "finished_utc": "2026-10-24T14:36:05.186791Z",
+    "frames": 288000,
+    "last_heartbeat_utc": "2026-10-24T14:36:05.117692Z",
+    "latest_retention": {
+      "quota_exceeded": true,
+      "removed": [
+        "369b1a35d30d4ad9a50272b4275d162c",
+        "a1a4413fed6245b4814a62ffb4584fa6",
+        "777ccd79c563452cba893ee2e3724beb",
+        "3065dace0e0a46c0adac3a889dd8a861",
+        "4ba47044115b44779a996e1d3a5faa8d",
+        "b28c92f4ca11411dab0f2dfbd5f3512c",
+        "c62080a9d906401083db514e8c7a6475",
+        "b8da404e83f74181921ca0735d53455d",
+        "da48a7f6e75444d58999c041a6380b48",
+        "a897962904f54f8c9c65ebec5d039e56",
+        "b55088f72f464cee9d3301350b5f6e21",
+        "a330c9efc7854bdeb5698bf13c5157e8",
+        "12a82434a74b437581145aee77dd0bc3",
+        "fa26cbb7f6c24747904179e214aea5de"
+      ],
+      "reserve_low": false,
+      "retained_bytes": 30298800
+    },
+    "media_seconds": 28800.0,
+    "peak_growth_kib": 12116,
+    "peak_rss_kib": 249148,
+    "pid": 257276,
+    "processing_mode": "exhaustive native-cadence archived frames; bounded delivery queue is independently dropped",
+    "requested_seconds": 28800,
+    "runtime": {
+      "ffmpeg_libraries": {
+        "libavcodec": [
+          63,
+          1,
+          102
+        ],
+        "libavdevice": [
+          63,
+          1,
+          102
+        ],
+        "libavfilter": [
+          12,
+          1,
+          102
+        ],
+        "libavformat": [
+          63,
+          1,
+          102
+        ],
+        "libavutil": [
+          61,
+          1,
+          102
+        ],
+        "libswresample": [
+          7,
+          1,
+          102
+        ],
+        "libswscale": [
+          10,
+          1,
+          102
+        ]
+      },
+      "pyav": "19.0.2",
+      "python": "3.15.1"
+    },
+    "sessions": 240,
+    "source_height": 180,
+    "source_native_fps": 10,
+    "source_sha256": "4c68d5508de8c777b512706379f06d3dd9768edad11dab440129643db336f2c0",
+    "source_width": 320,
+    "started_utc": "2026-10-24T06:31:45.348241Z",
+    "status": "passed",
+    "wall_seconds": 29059.838558247004,
+    "post_run_acceptance": "validation/final_acceptance.json"
+  },
+  "publication": {
+    "remote": "https://github.com/Tarvorix/Parcae_UAP.git",
+    "policy": "Final commit CI must pass before merge; consult GitHub commit/PR checks for the publication result"
+  },
+  "camera_validation": "not performed; WP6 outside current authorization",
+  "portable_source": {
+    "result": "passed",
+    "network": "offline cache only after installed dependencies",
+    "command": "UV_OFFLINE=1 npm_config_offline=true make setup test",
+    "pytest_passed": 54,
+    "pytest_wall_seconds": 45.64,
+    "ruff": "passed",
+    "mypy_modules": 33,
+    "vitest_passed": 2,
+    "typescript_build": "passed"
+  },
+  "retention_regression": "retention_review_results.json"
+}
