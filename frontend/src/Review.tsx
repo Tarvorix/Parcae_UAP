@@ -61,20 +61,20 @@ export function Review() {
   const time=(selected?.start_seconds??0)+playTime;
   const width=detail?.capture?.stream_info.width??320,height=detail?.capture?.stream_info.height??180;
   return <section className="review-section">
-    <div className="section-heading"><div><span className="eyebrow">OFFLINE EVIDENCE WORKFLOW</span><h2>Observe, inspect, review</h2></div><button onClick={()=>void start()} disabled={busy}>{busy?'Processing generated footage…':'Analyze generated footage'}</button></div>
+    <div className="section-heading"><div><span className="eyebrow">EVIDENCE WORKFLOW</span><h2>Observe, inspect, review</h2></div><button onClick={()=>void start()} disabled={busy}>{busy?'Processing generated footage…':'Analyze generated footage'}</button></div>
     <p className="muted">Native 320 × 180 / 20 fps analysis. Generated detections are software tests. Physical speed, range and sky calibration are unavailable.</p>
-    {stats&&<p className="muted">Local data {(stats.application_bytes/1048576).toFixed(1)} MiB · free disk {(stats.disk_free_bytes/1073741824).toFixed(1)} GiB · no real camera connected</p>}
+    {stats&&<p className="muted">Local data {(stats.application_bytes/1048576).toFixed(1)} MiB · free disk {(stats.disk_free_bytes/1073741824).toFixed(1)} GiB</p>}
     <p className="muted">Local updates: <span data-testid="connection">{connection}</span></p>
     {error&&<p role="alert">{error}</p>}
     <div className="event-grid"><aside className="panel event-list"><h3>Recent events</h3><label>Find event<input aria-label="Find event" value={search} placeholder="Event ID / UTC date" onChange={e=>{setSearch(e.target.value);setPage(1);}}/></label><button onClick={()=>void refresh().catch(e=>setError(String(e)))}>Refresh</button>
-      {!events.length&&<p>No events yet. Analyze the generated footage to begin.</p>}
+      {!events.length&&<p>No events yet. Start a camera test above or analyze the generated footage.</p>}
       {events.map(event=><button className={`event-row ${detail?.event_id===event.id?'selected':''}`} key={event.id} onClick={()=>void open(event.id).catch(e=>setError(String(e)))}>
         <strong>{event.start_seconds.toFixed(2)}–{event.end_seconds.toFixed(2)} s</strong><span>{event.state==='incomplete_source_gap'?'Partial context':event.state}</span><small>{new Date(event.created_utc).toLocaleString()}</small>
       </button>)}
     <div className="controls"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>Previous page</button><span>Page {page}</span><button disabled={events.length<20} onClick={()=>setPage(p=>p+1)}>Next page</button></div></aside><section className="panel detail-panel">
       {!detail?<p>Select an event to inspect its preserved source, trajectory, assessment and review history.</p>:<>
         <h3>Event detail <span className="badge">{detail.capture?.complete?'Complete context':'Incomplete context'}</span></h3>
-        <p className="notice">{detail.capture?.limitations.join(' · ')||'Available context preserved.'} The short demo cannot supply 30 seconds before and 45 seconds after.</p>
+        <p className="notice">{detail.capture?.limitations.join(' · ')||'Available context preserved.'} Boundary events can have partial pre/post context.</p>
         <label>Source segment <select value={segment} onChange={e=>{setSegment(e.target.value);setPlayTime(0);}}>{detail.segments.map(s=><option key={s.id} value={s.id}>{s.start_seconds.toFixed(3)}–{s.end_seconds.toFixed(3)} s</option>)}</select></label>
         {segment&&<><div className="media-wrap" style={{aspectRatio:`${width}/${height}`}}>
           <video key={segment} controls src={`/api/v1/events/${detail.event_id}/segments/${segment}/preview.mp4`} onTimeUpdate={e=>setPlayTime(e.currentTarget.currentTime)} onError={()=>setError('Playback unavailable. The source download is separate; inspect integrity before continuing.')} />

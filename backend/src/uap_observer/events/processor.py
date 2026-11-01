@@ -37,6 +37,7 @@ class OfflineProcessor:
         pre: float = 30,
         post: float = 45,
         until: threading.Event | None = None,
+        cancel: threading.Event | None = None,
     ) -> dict[str, Any]:
         session = self.ledger.query("SELECT * FROM sessions WHERE id=?", (session_id,))[0]
         run_id = uuid4().hex
@@ -119,6 +120,8 @@ class OfflineProcessor:
         def segments() -> Iterator[dict[str, Any]]:
             seen: set[str] = set()
             while True:
+                if cancel and cancel.is_set():
+                    raise RuntimeError("analysis_interrupted")
                 pending = self.ledger.query(
                     "SELECT * FROM segments WHERE session_id=? AND state='sealed' AND indexed=1 ORDER BY start_seconds",
                     (session_id,),
@@ -149,6 +152,8 @@ class OfflineProcessor:
             )
             with av.open(str(Path(segment["path"]))) as source:
                 for index, frame in enumerate(source.decode(video=0)):
+                    if cancel and cancel.is_set():
+                        raise RuntimeError("analysis_interrupted")
                     if index >= len(rows):
                         raise ValueError("source frame index unavailable")
                     row = rows[index]
@@ -221,10 +226,9 @@ def reanalyze_capture(
     from ..evidence.files import digest
 
     event = evidence.event(event_id)
-    folder = Path(event["manifest_path"]).parent
-    if digest(folder / "capture_manifest.json") != event["manifest_sha256"]:
+    if digest(Path(event["manifest_path"])) != event["manifest_sha256"]:
         raise ValueError("capture integrity failure")
-    capture = json.loads((folder / "capture_manifest.json").read_text())
+    capture = json.loads(Path(event["manifest_path"]).read_text())
     original = ledger.query(
         "SELECT data_json FROM analyses WHERE event_id=? ORDER BY created_utc DESC LIMIT 1",
         (event_id,),
@@ -271,28 +275,32 @@ def reanalyze_capture(
             (revision, event_id, utc_now(), json.dumps(data)),
         )
 
-    with (folder / "frames.json").open("rb") as metadata, metadata_index(metadata) as db:
-        for segment in capture["coverage"]:
-            name = f"source_segments/{segment['id']}.mkv"
-            expected = next(a["sha256"] for a in capture["artifacts"] if a["relative_path"] == name)
-            if digest(folder / name) != expected:
-                raise ValueError("source integrity failure")
-            references = db.execute(
-                "SELECT data_json FROM frames WHERE segment_id=? ORDER BY ordinal", (segment["id"],)
-            )
-            with av.open(str(folder / name)) as source:
-                for frame, stored in zip(source.decode(video=0), references, strict=True):
-                    row = json.loads(stored["data_json"])
-                    if row["mapping_state"] != "exact" or row["media_seconds"] is None:
-                        continue
-                    result = detector.process(
-                        np.asarray(frame.to_ndarray(format="bgr24"), dtype=np.uint8),
-                        row["id"],
-                        camera_id,
-                        event["session_id"],
-                    )
-                    tracker.update(row["media_seconds"], result.candidates)
-                    save(tracker.drain_ended())
+    with evidence.shared.payloads(event_id) as payloads:
+        with payloads["frames.json"].open("rb") as metadata, metadata_index(metadata) as db:
+            for segment in capture["coverage"]:
+                name = f"source_segments/{segment['id']}.mkv"
+                expected = next(
+                    a["sha256"] for a in capture["artifacts"] if a["relative_path"] == name
+                )
+                if digest(payloads[name]) != expected:
+                    raise ValueError("source integrity failure")
+                references = db.execute(
+                    "SELECT data_json FROM frames WHERE segment_id=? ORDER BY ordinal",
+                    (segment["id"],),
+                )
+                with av.open(str(payloads[name])) as source:
+                    for frame, stored in zip(source.decode(video=0), references, strict=True):
+                        row = json.loads(stored["data_json"])
+                        if row["mapping_state"] != "exact" or row["media_seconds"] is None:
+                            continue
+                        result = detector.process(
+                            np.asarray(frame.to_ndarray(format="bgr24"), dtype=np.uint8),
+                            row["id"],
+                            camera_id,
+                            event["session_id"],
+                        )
+                        tracker.update(row["media_seconds"], result.candidates)
+                        save(tracker.drain_ended())
     for track in tracker.tracks:
         track.state, track.end_reason = "ended", "preserved_capture_ended"
     save(tracker.tracks)

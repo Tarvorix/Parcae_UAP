@@ -7,3 +7,6 @@ cameras:
 # Rolling source quota; protected event data is never deleted to satisfy it.
 rolling_quota_bytes: 2147483648
 safety_reserve_bytes: 134217728
+
+# Includes source, metadata, database, derivatives and exports; never deletes protected evidence.
+total_evidence_budget_bytes: 2147483648

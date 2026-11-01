@@ -24,6 +24,7 @@ class CaptureSupervisor:
         self.retries, self.backoff_seconds, self.settings = retries, backoff_seconds, settings
         self.stop_requested = threading.Event()
         self.sessions: list[str] = []
+        self.recorders: list[Recorder] = []
         self.current: Recorder | None = None
         self.state = "stopped"
 
@@ -33,6 +34,7 @@ class CaptureSupervisor:
                 break
             self.current = Recorder(self.ledger, self.root, self.source, **self.settings)
             self.sessions.append(self.current.session_id)
+            self.recorders.append(self.current)
             self.state = "running"
             self.current.start()
             while not self.current.done.wait(0.1):

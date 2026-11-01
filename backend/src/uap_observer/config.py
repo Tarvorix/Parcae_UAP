@@ -46,6 +46,7 @@ class StationConfig(Model):
     cameras: list[str] = Field(min_length=1)
     rolling_quota_bytes: int = Field(default=2147483648, ge=0)
     safety_reserve_bytes: int = Field(default=134217728, ge=0)
+    total_evidence_budget_bytes: int = Field(default=2147483648, gt=0)
 
 
 def load_station(path: Path) -> tuple[StationConfig, list[CameraConfig]]:

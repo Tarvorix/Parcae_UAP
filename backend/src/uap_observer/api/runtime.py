@@ -12,8 +12,9 @@ from uuid import uuid4
 import numpy as np
 
 from ..capture.analysis import ArchiveAnalysis
+from ..capture.commission import CommissioningCapture
 from ..capture.recorder import Recorder
-from ..capture.tools import utc_now
+from ..capture.tools import utc_now, validate_input
 from ..config import load_station
 from ..detection.detector import DetectorConfig
 from ..events.processor import OfflineProcessor
@@ -34,7 +35,12 @@ class Runtime:
         self.data.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lease = DataLease(self.data)
         self.ledger = Ledger(self.data / "ledger.sqlite")
-        self.evidence = EvidenceService(self.ledger, self.data / "evidence")
+        self.evidence = EvidenceService(
+            self.ledger,
+            self.data / "evidence",
+            self.station.total_evidence_budget_bytes,
+            self.station.safety_reserve_bytes,
+        )
         self.evidence.recover(self.data / "archive")
         self.ledger.execute(
             "UPDATE jobs SET state='interrupted',error='application_restarted' WHERE state='running'"
@@ -42,6 +48,7 @@ class Runtime:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="offline-job")
         self.future: Future[None] | None = None
         self.recorder: Recorder | None = None
+        self.live: CommissioningCapture | None = None
         self.lock = threading.Lock()
 
     def settings(self) -> dict[str, Any]:
@@ -85,6 +92,10 @@ class Runtime:
             fixture = self.root / "artifacts/fixtures/sky.mkv"
             if not fixture.is_file():
                 raise ValueError("run make fixtures first")
+            try:
+                self.evidence.budget.check(16 * 1024 * 1024)
+            except OSError:
+                raise ValueError("Total application storage budget or reserve exceeded") from None
             job_id = uuid4().hex
             self.ledger.execute(
                 "INSERT INTO jobs(id,created_utc,state) VALUES (?,?,?)",
@@ -92,6 +103,34 @@ class Runtime:
             )
             settings = self.settings()
             self.future = self.executor.submit(self._process, job_id, fixture, settings)
+            return job_id
+
+    def start_live(self, source: str) -> str:
+        if not source.startswith(("rtsp://", "rtsps://")):
+            raise ValueError("Commissioning requires a private LAN RTSP address")
+        source = validate_input(source, allow_remote=True)
+        with self.lock:
+            if self.future and not self.future.done():
+                raise ValueError("Another capture or analysis is already running")
+            if shutil.disk_usage(self.data).free < self.station.safety_reserve_bytes:
+                raise ValueError("Storage safety reserve is low")
+            try:
+                self.evidence.budget.check(16 * 1024 * 1024)
+            except OSError:
+                raise ValueError("Total application storage budget or reserve exceeded") from None
+            job_id = uuid4().hex
+            self.ledger.execute(
+                "INSERT INTO jobs(id,created_utc,state) VALUES (?,?,?)",
+                (job_id, utc_now(), "running"),
+            )
+            self.live = CommissioningCapture(
+                self.ledger,
+                self.evidence,
+                self.data,
+                self.station.safety_reserve_bytes,
+                self.station.rolling_quota_bytes,
+            )
+            self.future = self.executor.submit(self.live.run, source, job_id)
             return job_id
 
     def _process(self, job_id: str, fixture: Path, settings: dict[str, Any]) -> None:
@@ -152,6 +191,8 @@ class Runtime:
             self.recorder = None
 
     def close(self) -> None:
+        if self.live:
+            self.live.stop()
         if self.recorder:
             self.recorder.stop()
         self.executor.shutdown(wait=True, cancel_futures=True)

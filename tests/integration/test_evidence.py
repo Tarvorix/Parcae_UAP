@@ -81,8 +81,7 @@ def test_partial_recovery_and_corruption(fixture_video, tmp_path):
     package = restored.export(event)
     verification = verify_package(package)
     assert verification["verified"] and not verification["complete"]
-    folder = Path(restored.event(event)["manifest_path"]).parent
-    source = next((folder / "source_segments").glob("*.mkv"))
+    source = restored.shared.source(event, restored.segments(event)[0]["id"])
     source.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="integrity"):
         restored.export(event)
@@ -121,15 +120,13 @@ def test_verifier_rejects_traversal_and_changed_bytes(tmp_path):
 def test_disk_full_never_seals_or_unpins_existing_source(
     fixture_video, tmp_path, monkeypatch
 ):
-    import shutil
-
     ledger, recorder, service = setup_capture(tmp_path, fixture_video)
     event = service.trigger(recorder.session_id, 1, 3, pre=0, post=0)
 
     def full(*args):
         raise OSError(28, "disk full")
 
-    monkeypatch.setattr(shutil, "copyfile", full)
+    monkeypatch.setattr(service.shared, "put_bytes", full)
     with pytest.raises(OSError):
         service.seal(event)
     assert service.event(event)["manifest_sha256"] is None

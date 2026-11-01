@@ -11,13 +11,22 @@ from ..capture.tools import utc_now
 from ..models import CaptureManifest, ExportManifest
 from ..storage.ledger import Ledger
 from .files import atomic_write, canonical, digest, safe_member, sync_directory, write_json_records
+from .shared import SharedStore, StorageBudget
 
 
 class EvidenceService:
-    def __init__(self, ledger: Ledger, root: Path) -> None:
+    def __init__(
+        self,
+        ledger: Ledger,
+        root: Path,
+        total_budget_bytes: int | None = 2147483648,
+        reserve_bytes: int = 0,
+    ) -> None:
         self.ledger, self.root = ledger, root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.budget = StorageBudget(self.root.parent, total_budget_bytes, reserve_bytes)
+        self.shared = SharedStore(ledger, self.root, self.budget)
 
     def trigger(
         self, session_id: str, start: float, end: float, pre: float = 30, post: float = 45
@@ -64,7 +73,14 @@ class EvidenceService:
 
     def seal(self, event_id: str) -> bool:
         with self.lock:
-            return self._seal(event_id)
+            try:
+                return self._seal(event_id)
+            except Exception:
+                self.ledger.execute(
+                    "UPDATE events SET state='capturing_postroll' WHERE id=? AND state='sealing'",
+                    (event_id,),
+                )
+                raise
 
     def _seal(self, event_id: str) -> bool:
         event = self.event(event_id)
@@ -75,13 +91,17 @@ class EvidenceService:
             return True
         existing_manifest = self.root / "events" / event_id / "capture_manifest.json"
         if existing_manifest.is_file():
+            stored_references = existing_manifest.parent / "storage.json"
+            if not self.shared.mapping(event_id) and stored_references.is_file():
+                self.shared.register(event_id, json.loads(stored_references.read_bytes()))
             sealed = CaptureManifest.model_validate_json(existing_manifest.read_bytes())
             if sealed.capture_id != event_id or sealed.session_id != event["session_id"]:
                 raise ValueError("orphan capture identity mismatch")
-            for sealed_artifact in sealed.artifacts:
-                path = safe_member(existing_manifest.parent, sealed_artifact.relative_path)
-                if not path.is_file() or digest(path) != sealed_artifact.sha256:
-                    raise ValueError("orphan sealed capture artifact integrity failure")
+            if not self.shared.mapping(event_id):
+                for sealed_artifact in sealed.artifacts:
+                    path = safe_member(existing_manifest.parent, sealed_artifact.relative_path)
+                    if not path.is_file() or digest(path) != sealed_artifact.sha256:
+                        raise ValueError("orphan sealed capture artifact integrity failure")
             self.ledger.execute(
                 "UPDATE events SET state=?,manifest_path=?,manifest_sha256=?,limitations_json=? WHERE id=?",
                 (
@@ -98,18 +118,29 @@ class EvidenceService:
             )
             return True
         session = self.ledger.query("SELECT * FROM sessions WHERE id=?", (event["session_id"],))[0]
+        self.budget.check(131072)
         with self.ledger.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT OR IGNORE INTO event_segments SELECT ?,id FROM segments WHERE session_id=? AND state='sealed' AND start_seconds<=? AND end_seconds>=?",
                 (event_id, event["session_id"], event["requested_end"], event["requested_start"]),
             )
-        segments = self.segments(event_id)
-        if any(segment["indexed"] == 0 for segment in segments):
-            return False
-        latest = max((s["end_seconds"] or 0 for s in segments), default=0)
-        if session["state"] in ("running", "connecting") and latest < event["requested_end"]:
-            return False
+            segments = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT s.* FROM segments s JOIN event_segments es ON s.id=es.segment_id WHERE es.event_id=? ORDER BY s.start_seconds",
+                    (event_id,),
+                )
+            ]
+            if any(segment["indexed"] == 0 for segment in segments):
+                return False
+            latest = max((segment["end_seconds"] or 0 for segment in segments), default=0)
+            if session["state"] in ("running", "connecting") and latest < event["requested_end"]:
+                return False
+            db.execute(
+                "UPDATE events SET state='sealing' WHERE id=? AND state='capturing_postroll'",
+                (event_id,),
+            )
         limitations = ["frame_index_unavailable"] if any(s["indexed"] < 0 for s in segments) else []
         cursor = event["requested_start"]
         for segment in segments:
@@ -133,56 +164,30 @@ class EvidenceService:
         stage.mkdir(parents=True, exist_ok=True)
         artifacts = []
         coverage = []
+        segment_ids = [segment["id"] for segment in segments]
+        recipes = {}
         for segment in segments:
-            source = Path(segment["path"])
-            if not source.is_file() or digest(source) != segment["sha256"]:
-                raise ValueError("source segment integrity failure")
-            name = f"source_segments/{segment['id']}.mkv"
-            target = safe_member(stage, name)
-            target.parent.mkdir(exist_ok=True)
-            shutil.copyfile(source, target)
+            self.shared.segment(segment["id"])
             artifacts.append(
-                {"relative_path": name, "sha256": segment["sha256"], "size_bytes": segment["bytes"]}
+                {
+                    "relative_path": f"source_segments/{segment['id']}.mkv",
+                    "sha256": segment["sha256"],
+                    "size_bytes": segment["bytes"],
+                }
             )
             coverage.append(
                 {k: segment[k] for k in ("id", "session_id", "start_seconds", "end_seconds")}
             )
-        with self.ledger.connect() as db:
-            write_json_records(
-                stage / "frames.json",
-                (
-                    dict(row)
-                    for row in db.execute(
-                        "SELECT frames.* FROM frames JOIN event_segments ON frames.segment_id=event_segments.segment_id WHERE event_id=? ORDER BY media_seconds",
-                        (event_id,),
-                    )
-                ),
+        for kind in ("frames", "packets"):
+            recipe = self.shared.recipe(segment_ids, kind)
+            recipes[kind + ".json"] = recipe
+            artifacts.append(
+                {
+                    "relative_path": kind + ".json",
+                    "sha256": recipe["sha256"],
+                    "size_bytes": recipe["size_bytes"],
+                }
             )
-        artifacts.append(
-            {
-                "relative_path": "frames.json",
-                "sha256": digest(stage / "frames.json"),
-                "size_bytes": (stage / "frames.json").stat().st_size,
-            }
-        )
-        with self.ledger.connect() as db:
-            write_json_records(
-                stage / "packets.json",
-                (
-                    dict(row)
-                    for row in db.execute(
-                        "SELECT packets.* FROM packets JOIN event_segments ON packets.segment_id=event_segments.segment_id WHERE event_id=? ORDER BY sequence",
-                        (event_id,),
-                    )
-                ),
-            )
-        artifacts.append(
-            {
-                "relative_path": "packets.json",
-                "sha256": digest(stage / "packets.json"),
-                "size_bytes": (stage / "packets.json").stat().st_size,
-            }
-        )
         recorded_stream = json.loads(session["stream_json"])
         data = {
             "schema_version": "1.1",
@@ -205,23 +210,16 @@ class EvidenceService:
         }
         data = CaptureManifest.model_validate(data).model_dump(mode="json", exclude_none=True)
         atomic_write(stage / "capture_manifest.json", canonical(data))
+        atomic_write(stage / "storage.json", canonical(recipes))
         if folder.exists():
-            # Recovery after directory seal but before database commit: never overwrite.
             existing = json.loads((folder / "capture_manifest.json").read_text())
             if existing != data:
                 raise ValueError("sealed capture conflicts with recovery snapshot")
             shutil.rmtree(stage)
         else:
-            for artifact in artifacts:
-                with safe_member(stage, artifact["relative_path"]).open("rb") as handle:
-                    import os
-
-                    os.fsync(handle.fileno())
-            sync_directory(stage / "source_segments") if (
-                stage / "source_segments"
-            ).exists() else None
             stage.replace(folder)
             sync_directory(folder.parent)
+        self.shared.register(event_id, recipes)
         manifest = folder / "capture_manifest.json"
         with self.ledger.connect() as db:
             db.execute(
@@ -266,13 +264,15 @@ class EvidenceService:
     def _export(self, event_id: str) -> Path:
         if not self.seal(event_id):
             raise ValueError("event still capturing postroll")
+        with self.shared.payloads(event_id) as files:
+            return self._export_files(event_id, files)
+
+    def _export_files(self, event_id: str, payloads: dict[str, Path]) -> Path:
         event = self.event(event_id)
-        source = Path(event["manifest_path"]).parent
         capture = CaptureManifest.model_validate_json(
-            (source / "capture_manifest.json").read_bytes()
+            payloads["capture_manifest.json"].read_bytes()
         ).model_dump(mode="json", exclude_none=True)
-        if digest(source / "capture_manifest.json") != event["manifest_sha256"]:
-            raise ValueError("sealed capture integrity failure")
+        self.budget.check(sum(a["size_bytes"] for a in capture["artifacts"]) + 1048576)
         export_id = uuid4().hex
         folder = self.root / "exports"
         folder.mkdir(exist_ok=True)
@@ -280,12 +280,12 @@ class EvidenceService:
         file_artifacts: dict[str, Path] = {}
         artifact_manifest = []
         for artifact in capture["artifacts"]:
-            path = safe_member(source, artifact["relative_path"])
+            path = payloads[artifact["relative_path"]]
             if not path.is_file() or digest(path) != artifact["sha256"]:
                 raise ValueError("capture artifact integrity failure")
             file_artifacts[artifact["relative_path"]] = path
             artifact_manifest.append(artifact)
-        file_artifacts["capture_manifest.json"] = source / "capture_manifest.json"
+        file_artifacts["capture_manifest.json"] = payloads["capture_manifest.json"]
         artifact_manifest.append(
             {
                 "relative_path": "capture_manifest.json",
@@ -398,7 +398,7 @@ class EvidenceService:
                 candidates = db.execute("""SELECT * FROM segments s WHERE state='sealed'
                     AND NOT EXISTS(SELECT 1 FROM event_segments es WHERE es.segment_id=s.id)
                     AND NOT EXISTS(SELECT 1 FROM events e WHERE e.session_id=s.session_id
-                      AND e.state='capturing_postroll' AND e.requested_start<=s.end_seconds AND e.requested_end>=s.start_seconds)
+                      AND e.state IN ('capturing_postroll','sealing') AND e.requested_start<=s.end_seconds AND e.requested_end>=s.start_seconds)
                     ORDER BY s.rowid LIMIT 64""").fetchall()
                 if not candidates:
                     break
@@ -503,7 +503,9 @@ class EvidenceService:
             Path(row["path"]).with_suffix(".ledger.json").unlink(missing_ok=True)
             self.ledger.execute("UPDATE segments SET state='deleted' WHERE id=?", (row["id"],))
         sealed = 0
-        for event in self.ledger.query("SELECT id FROM events WHERE state='capturing_postroll'"):
+        for event in self.ledger.query(
+            "SELECT id FROM events WHERE state IN ('capturing_postroll','sealing')"
+        ):
             sealed += int(self.seal(event["id"]))
         return {
             "recovered_segments": recovered,

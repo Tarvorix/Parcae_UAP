@@ -1,3 +1,4 @@
+import ipaddress
 import re
 import shutil
 import subprocess
@@ -29,9 +30,29 @@ def dependency_versions() -> dict[str, str]:
 
 def validate_input(source: str, allow_remote: bool = False) -> str:
     if source.startswith(("rtsp://", "rtsps://")):
-        host = urlsplit(source).hostname
+        try:
+            parsed = urlsplit(source)
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            raise ValueError("Invalid RTSP address") from None
+        if not host or any(ord(c) < 33 for c in source) or parsed.fragment:
+            raise ValueError("Invalid RTSP address")
+        if port is not None and port < 1:
+            raise ValueError("Invalid RTSP port")
         if not allow_remote and host not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("Only loopback RTSP is enabled; real-camera commissioning is gated")
+        if allow_remote and host != "localhost":
+            # Literal addresses avoid DNS rebinding and accidental Internet access.
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                raise ValueError("Use the camera's numeric LAN address from Aqara Home") from None
+            ranges = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+            if not address.is_loopback and not any(
+                address in ipaddress.ip_network(network) for network in ranges
+            ):
+                raise ValueError("Only private LAN or loopback RTSP addresses are accepted")
         return source
     if "://" in source:
         raise ValueError("Only local files or explicitly enabled RTSP are supported")

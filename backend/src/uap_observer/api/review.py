@@ -42,21 +42,26 @@ def review_router(runtime: Runtime) -> APIRouter:
         import shutil
 
         usage = shutil.disk_usage(runtime.data)
-        stored = 0
-        for path in runtime.data.rglob("*"):
-            try:
-                if path.is_file():
-                    stored += path.stat().st_size
-            except FileNotFoundError:
-                # Retention may remove an unprotected file during this read-only scan.
-                continue
+        storage = runtime.evidence.budget.usage()
+        stored = storage["logical_bytes"]
         return {
             "disk_free_bytes": usage.free,
             "application_bytes": stored,
+            "application_allocated_bytes": storage["allocated_bytes"],
+            "total_evidence_budget_bytes": runtime.station.total_evidence_budget_bytes,
+            "total_budget_exceeded": max(stored, storage["allocated_bytes"])
+            >= runtime.station.total_evidence_budget_bytes,
             "events": runtime.ledger.query("SELECT count(*) AS n FROM events")[0]["n"],
             "sessions": runtime.ledger.query("SELECT count(*) AS n FROM sessions")[0]["n"],
             "active_job": bool(runtime.future and not runtime.future.done()),
-            "camera_connected": False,
+            "camera_connected": bool(
+                runtime.live
+                and runtime.live.state == "capturing"
+                and runtime.live.supervisor
+                and runtime.live.supervisor.current
+                and not runtime.live.supervisor.current.done.is_set()
+                and runtime.live.supervisor.current.packet_count
+            ),
             "rolling_quota_bytes": runtime.station.rolling_quota_bytes,
             "safety_reserve_bytes": runtime.station.safety_reserve_bytes,
             "reserve_low": usage.free < runtime.station.safety_reserve_bytes,
@@ -190,13 +195,10 @@ def review_router(runtime: Runtime) -> APIRouter:
             raise HTTPException(404, "Segment unavailable")
         if not event["manifest_path"]:
             raise HTTPException(409, "Capture is not sealed")
-        path = Path(event["manifest_path"]).parent / "source_segments" / f"{segment_id}.mkv"
-        expected = next(
-            s["sha256"] for s in runtime.evidence.segments(event_id) if s["id"] == segment_id
-        )
-        if not path.is_file() or digest(path) != expected:
-            raise HTTPException(409, "Source integrity failure")
-        return path
+        try:
+            return runtime.evidence.shared.source(event_id, segment_id)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, "Source integrity failure") from exc
 
     @router.get("/events/{event_id}/segments/{segment_id}/source")
     def original(event_id: str, segment_id: str) -> FileResponse:
@@ -215,8 +217,10 @@ def review_router(runtime: Runtime) -> APIRouter:
         if not target.exists():
             from uuid import uuid4
 
+
             temporary = derived / f"{uuid4().hex}.mp4"
             try:
+                runtime.evidence.budget.check(source.stat().st_size + 16 * 1024 * 1024)
                 subprocess.run(
                     [
                         "ffmpeg",
@@ -244,6 +248,7 @@ def review_router(runtime: Runtime) -> APIRouter:
                     check=True,
                     timeout=30,
                 )
+                runtime.evidence.budget.check()
                 temporary.replace(target)
             except (subprocess.SubprocessError, OSError) as exc:
                 temporary.unlink(missing_ok=True)

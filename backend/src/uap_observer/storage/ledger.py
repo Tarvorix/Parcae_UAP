@@ -73,6 +73,10 @@ CREATE TABLE settings(revision INTEGER PRIMARY KEY,created_utc TEXT NOT NULL,dat
     """
 CREATE INDEX event_segments_segment ON event_segments(segment_id);
 """,
+    """
+CREATE TABLE segment_snapshots(segment_id TEXT PRIMARY KEY REFERENCES segments(id),snapshot_json TEXT NOT NULL);
+CREATE TABLE shared_captures(event_id TEXT PRIMARY KEY REFERENCES events(id),path TEXT NOT NULL,sha256 TEXT NOT NULL);
+""",
 ]
 
 

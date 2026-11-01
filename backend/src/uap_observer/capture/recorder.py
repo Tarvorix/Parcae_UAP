@@ -31,11 +31,12 @@ class Recorder:
         read_timeout: float = 3.0,
         reset_segment_timestamps: bool = False,
         max_segment_packets: int = 10000,
+        allow_lan: bool = False,
     ) -> None:
         if segment_seconds <= 0 or transport not in ("tcp", "udp") or max_segment_packets < 1:
             raise ValueError("invalid capture settings")
         self.ledger, self.root = ledger, root.resolve()
-        self.source = validate_input(source)
+        self.source = validate_input(source, allow_remote=allow_lan)
         self.camera_id = camera_id
         self.segment_seconds, self.realtime = segment_seconds, realtime
         self.transport, self.read_timeout = transport, read_timeout
@@ -89,6 +90,11 @@ class Recorder:
         )
         self.out_stream = self.output.add_stream_from_template(stream)
         self.segment_start, self.segment_end = seconds, seconds
+        if seconds is None:
+            self.ledger.execute(
+                "INSERT INTO gaps(session_id,observed_utc,reason) VALUES (?,?,?)",
+                (self.session_id, utc_now(), "initial_keyframe_timestamp_unavailable"),
+            )
         self.offset = (dts or 0) if self.reset_segment_timestamps else 0
         self.rows = []
 
@@ -246,6 +252,11 @@ class Recorder:
                             max(0, self.started + seconds - first - time.monotonic())
                         ):
                             break
+                    # Some RTSP demuxers yield an initial keyframe/header packet without PTS.
+                    # Preserve it, but use the first *observed* timestamp for the segment's
+                    # known coverage bound. Never infer that packet's missing timestamp.
+                    if self.output is not None and self.segment_start is None and seconds is not None:
+                        self.segment_start = seconds
                     if (
                         self.output is not None
                         and packet.is_keyframe

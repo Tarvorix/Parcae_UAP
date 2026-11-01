@@ -71,6 +71,13 @@ def verify_package(path: Path) -> dict[str, Any]:
                 archive.open("packets.json") as packets,
                 metadata_index(frames, packets) as db,
             ):
+                for stored_packet in db.execute("SELECT * FROM packets"):
+                    packet_reference = json.loads(stored_packet["data_json"])
+                    if (
+                        packet_reference["segment_id"] not in segments
+                        or packet_reference["session_id"] != capture.session_id
+                    ):
+                        errors.add("packet_segment_reference")
                 for stored in db.execute("SELECT * FROM frames"):
                     frame = json.loads(stored["data_json"])
                     if (

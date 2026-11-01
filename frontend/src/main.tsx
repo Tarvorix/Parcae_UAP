@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { get, formatTime, type FramePacket, type StreamInfo } from './api';
 import './style.css';
 import { Review } from './Review';
+import { Camera } from './Camera';
 
 function App() {
   const [sources, setSources] = useState<StreamInfo[]>([]);
@@ -27,8 +28,9 @@ function App() {
     return () => window.clearTimeout(id);
   }, [playing, packet, info]);
   return <main>
-    <header><span className="eyebrow">STATIONARY SKY OBSERVATION / OFFLINE BETA</span><h1>UAP Observer</h1><p>Offline lab <span className="badge">Generated footage</span></p></header>
-    <section className="notice">Software test only. No camera connected. Generated detections remain unresolved; this is not field-performance validation.</section>
+    <header><span className="eyebrow">STATIONARY SKY OBSERVATION / LOCAL BETA</span><h1>UAP Observer</h1><p>Camera commissioning and offline lab <span className="badge">Generated footage</span></p></header>
+    <section className="notice">Pixel observations only. Camera commissioning and generated tests do not establish field detection accuracy, physical range or speed.</section>
+    <Camera/>
     <section className="panel">
       <label>Preview source <select value={source} onChange={e => {setPlaying(false); setSource(e.target.value); setIndex(0);}}>
         {sources.map(s => <option key={s.source_id} value={s.source_id}>{s.source_id === 'synthetic' ? 'Synthetic generator' : 'Encoded video-file replay'}</option>)}

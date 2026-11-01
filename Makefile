@@ -1,4 +1,5 @@
 UV ?= uv
+export PYTHONPATH := $(CURDIR)/backend/src$(if $(PYTHONPATH),:$(PYTHONPATH))
 .PHONY: setup fixtures demo test browser-test
 setup:
 	$(UV) sync --project backend --locked

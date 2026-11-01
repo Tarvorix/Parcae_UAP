@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .api.camera import camera_router
 from .api.review import review_router
 from .api.runtime import Runtime
 from .config import load_station
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def create_app(root: Path = ROOT, data_directory: Path | None = None) -> FastAPI:
-    # This finite fixture preview deliberately does not implement live capture queues.
+    # Fixture preview is finite; commissioning has a separate bounded live preview.
     runtime = Runtime(root, data_directory)
     cache: dict[str, tuple[StreamInfo, list[DecodedFrame], SourceHealth]] = {}
 
@@ -59,6 +60,7 @@ def create_app(root: Path = ROOT, data_directory: Path | None = None) -> FastAPI
 
     app.state.runtime = runtime
     app.include_router(review_router(runtime))
+    app.include_router(camera_router(runtime))
 
     @app.middleware("http")
     async def local_origin(request, call_next):  # type: ignore[no-untyped-def]
@@ -77,7 +79,7 @@ def create_app(root: Path = ROOT, data_directory: Path | None = None) -> FastAPI
     def health() -> dict[str, object]:
         return {
             "status": "ok",
-            "mode": "offline-fixture",
+            "mode": "local-commissioning" if runtime.live else "offline-fixture",
             "capabilities": [
                 "preview",
                 "file_capture",
